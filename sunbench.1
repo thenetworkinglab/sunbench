@@ -1,0 +1,461 @@
+.\" sunbench(1) -- man page, classic -man macros (nroff/Solaris man safe)
+.\" Copyright (C) 2026 thenetworkinglab
+.\" SPDX-License-Identifier: GPL-3.0-or-later  (see LICENSE)
+.TH SUNBENCH 1 "22 November 2026" "sunbench 2026.11.22-4" "User Commands"
+.SH NAME
+sunbench \- disk, CPU, memory and network benchmark for SunOS 4 and Solaris 2.x on SPARC
+.SH SYNOPSIS
+.B sunbench
+[
+.I options
+] [
+.B disk
+|
+.B cpu
+|
+.B mem
+|
+.B net
+|
+.B full
+|
+.B menu
+]
+.SH DESCRIPTION
+.B sunbench
+measures disk, CPU, memory and network performance on classic Sun hardware.
+It is small,
+self-contained (libc only \- no ncurses, no autoconf) and builds with the
+bundled K&R
+.BR cc (1)
+on SunOS 4 as well as with an ANSI compiler on Solaris 2.x.
+.PP
+Results are honest because the page cache is bypassed.  On Solaris 2.6 and
+later
+.BR directio (3C)
+is used, which makes the measurement independent of how much RAM the machine
+has; on older systems the test file is instead sized larger than physical
+memory.  The method actually in use is printed with every run.
+.PP
+Four access patterns are measured: sequential write, sequential read, random
+read and random write.  Per-operation latency is accumulated into a
+logarithmic histogram, so the distribution (not merely the average) is
+available \- important on emulated SCSI devices, whose latency is often
+bimodal.
+.SH COMMANDS
+.TP
+.B disk
+Run the standard four-test benchmark at one block size.  This is the default
+when a command is given.
+.TP
+.B cpu
+Integer (ALU and multiply/divide), double-precision floating-point,
+Linpack-style MFLOPS (single- and double-precision
+.BR "y[i] += a*x[i]" ,
+the Linpack inner loop, over a Linpack-100-sized working set AND over a
+streaming footprint sized at run time to overflow any external cache --
+on a big-cache machine the gap between the two is the cache benefit),
+Dhrystone 2.1 and Whetstone kernels.  The mul/div kernel is separated from the
+ALU kernel to expose the difference between sun4c (SPARC V7, software integer
+multiply/divide) and sun4m/sun4u (V8/V9, hardware).  Dhrystone reports
+Dhrystones per second and VAX MIPS; Whetstone reports MWIPS -- both for
+comparison with published figures (note: Dhrystone 2.1 reports lower than the
+older, more compiler-inflated Dhrystone 1.1 seen in vintage marketing).
+Results are labelled with the build target (compiler and
+.BR \-mcpu ),
+since a V7 build and a native build measure different things on the same box.
+Per-clock efficiency is reported when the clock is known (see
+.BR \-\-mhz ).
+On a terminal the CPU run is shown in the same live full-screen display as the
+disk benchmark; piped, redirected or
+.B \-\-plain
+output stays plain text.
+.IP
+On machines with small direct-mapped instruction caches (for example
+microSPARC), Dhrystone is sensitive to code placement: relinking the same
+objects in a different order has been measured to change the score by almost
+1.5x on a SPARCstation LX.  Compare machines using the same
+.B sunbench
+binary, and prefer the custom kernels (which fit in cache and are immune)
+for exact cross-machine ratios.
+.IP
+With
+.B \-\-mp
+(or
+.BR \-\-cpus )
+the CPU test instead measures multiprocessor scaling: one process is run alone
+for a baseline, then N processes run the same kernel concurrently (by
+.BR fork (2),
+never threads).  The report gives the single-process rate, the N-way aggregate,
+the speedup and the scaling efficiency; efficiency below 100% reflects
+contention on the memory interconnect between the processors.  MP figures are
+wall-clock rates.
+.TP
+.B mem
+Memory bandwidth and latency versus working-set size.  Five kernels --
+integer read, 8-byte FPU read (on 32-bit SPARC
+.B ldd
+moves twice the bytes per instruction), integer write, libc
+.BR memcpy ,
+and a random pointer-chase reporting nanoseconds per dependent load -- are
+each run over working sets from 1 KB up to min(256 MB, RAM/4), doubling each
+step (see
+.BR \-\-memsize ).
+Bandwidth falls and latency rises at every cache boundary, so the table maps
+the machine's cache hierarchy.  With
+.B \-\-mp
+(or
+.BR \-\-cpus )
+it instead runs five multiprocessor experiments, each pitting N concurrent
+processes (private buffers) against one process alone: a 16 KB read as an
+in-cache control (private L1 caches should scale at N.00x; less means the
+run is noisy), read, write and
+.B memcpy
+copy at the full working-set size (write and copy add the coherency and
+two-way traffic a shared bus or a crossbar handle differently), and the
+pointer chase alone versus under N-1 streaming readers -- the loaded-latency
+figure.  The aggregate-vs-single ratios show how much memory bandwidth the
+interconnect has beyond a single CPU's demand, and what a busy neighbour
+does to another CPU's memory latency.
+.TP
+.B net
+Network benchmark against the bundled server,
+.BR sunbench-netd ,
+which runs on a modern machine (build it there with
+.B make netd
+from this same source tree) so the far end is never the bottleneck.
+Everything rides plain TCP and UDP over IP, so any IP-capable interface --
+Ethernet, token ring, FDDI, ATM, PPP -- is measured the same way, with no
+link-layer code.  The tests: TCP upload and download (64 KB application
+chunks, labelled in the report), TCP round-trip latency (ms), TCP
+.B write-size and read-size
+sweeps (throughput versus the application
+.BR write (2) / read (2)
+size, 64 bytes to 64 KB, in each direction -- these are not wire packets,
+since the kernel segments to the MSS regardless; the curves isolate the
+per-syscall cost that limits small-write programs on a slow CPU), and a UDP
+datagram-size sweep in
+.B both directions
+reporting achieved Mbit/s
+.B and
+loss percentage per size.  The UDP download direction is paced by the server
+to 1.5x the client's upload result for the same size, so its loss column
+shows the client's receive ceiling rather than the raw speed mismatch with a
+fast server.  The sweep is capped at the local interface's MTU
+by default (detected via
+.BR SIOCGIFMTU ;
+Ethernet 1500, FDDI 4352, token ring and ATM larger), so each interface is
+driven with the frame sizes it was built for;
+.B \-\-netmax
+raises the cap to explore IP fragmentation deliberately.
+.TP
+.B full
+Unattended full suite: the standard disk benchmark, the block-size sweep,
+the CPU benchmark, the memory sweep and -- when
+.B \-\-server
+is given -- the network benchmark, in plain text, appending everything
+to the log.  On a multiprocessor the CPU and memory MP scaling stages run
+automatically after their single-process counterparts (the suite proper is
+always single-process, so machines compare on identical terms); on a
+single-CPU machine they are skipped.
+.B \-\-cpus
+forces a specific process count.  Suited to running over a serial console or telnet and walking
+away.  With
+.B \-\-csv
+each module writes its own derived file (the schemas differ):
+.I fleet.csv
+becomes
+.IR fleet-disk.csv ,
+.IR fleet-cpu.csv ,
+.I fleet-mem.csv
+and
+.IR fleet-net.csv .
+.TP
+.B menu
+Interactive arrow-key menu.  This is the default when
+.B sunbench
+is started on a terminal with no command.
+.SH OPTIONS
+.TP
+.BI \-\-path " FILE"
+Scratch file used for the benchmark.  Default
+.IR ./sunbench.dat .
+This must be on a real disk; see
+.B NOTES
+below.
+.TP
+.BI \-\-size " MB"
+Size of the test file.  The default is chosen automatically: a fixed,
+RAM-independent size when
+.B directio
+is available, otherwise physical memory times 2.5 (so reads stay cold across consecutive tests without directio).  The value is capped to
+half of the free space on the target filesystem.  A larger file makes the
+random tests scatter over a wider region of the disk, which is more
+representative of real-world random access; the block-size sweep therefore
+defaults to 256 MB.  A note is printed when the file ends up 64 MB or smaller,
+as a small random span may not reflect real-world behaviour.
+.TP
+.BI \-\-block " KB"
+I/O block size for the standard run.  Default 64.
+.TP
+.BI \-\-time " SEC"
+Duration of each timed test.  Default 8 seconds (4 per cell in a sweep).
+.TP
+.B \-\-sweep
+Run a block-size sweep from 4 KB to 1 MB instead of the standard run,
+reporting throughput and IOPS for each block size.
+.TP
+.B \-\-diskfull
+For the
+.B disk
+command: run the standard four-test run AND the block-size sweep, back to
+back, in plain text -- the full disk suite, exactly the two disk stages
+that
+.B full
+runs, without the CPU, memory and network modules.  Both append to the
+same log, CSV and HTML report.  Combine with
+.B \-\-hist
+for the latency distribution.  The natural command for characterizing one
+disk configuration.
+.TP
+.B \-\-hist
+Print the full latency distribution for the random tests, as an ASCII
+histogram, in addition to the percentile summary.
+.TP
+.BI \-\-log " FILE"
+Show the report on screen as usual and additionally append a copy to
+.IR FILE .
+Each logged run is preceded by a separator, a timestamp and a system synopsis
+(uname, hardware model, RAM, filesystem, disk device, drive model, and the
+UP network interfaces with their MTUs), so a
+single log may accumulate runs from many machines.  Progress output stays on
+standard error and never enters the file.
+.TP
+.BI \-\-csv " FILE"
+Append one wide, spreadsheet-ready row to
+.IR FILE .
+For a
+.B disk
+sweep the row is system metadata followed by throughput in MB/s for every
+block size; for the
+.B cpu
+command it is metadata, clock and build target followed by the per-kernel
+figures (integer, floating-point, Dhrystone and Whetstone); for
+.B mem
+it is metadata followed by read/read8/write/copy MB/s and chase latency for
+every working-set size.  Each command uses its own schema.  The header line is written only when the file is empty, so
+rows from many machines accumulate into one table.
+.TP
+.BI \-\-html " FILE"
+Write a self-contained HTML report of everything run this session: inline
+CSS, no JavaScript, no external references, printable.  Sweep tables carry
+proportional bars and are followed by inline-SVG line charts (throughput
+versus block size, the memory cache cliff and latency steps, the TCP and
+UDP size curves).  The file is rewritten after each completed run, so a
+long session grows it incrementally.  Reports generated by older versions
+can be upgraded with
+.BR sunbench-htmlgraph
+(build with
+.BR "make htmlgraph" ),
+which parses the sweep tables out of an existing report and injects the
+same charts.
+.TP
+.B \-\-quiet
+Suppress all progress output and success notices on standard error; warnings
+and errors still print.  Implies
+.BR \-\-plain .
+Intended for scripts and cron:
+.B sunbench \-q \-\-log ... \-\-csv ... \-\-html ... full
+produces its artifacts and nothing else.
+.TP
+.BI \-\-note " TEXT"
+Free-text value placed in the CSV
+.B note
+column, for facts
+.B sunbench
+cannot discover (OBP revision, SCSI chip, drive replacement, and so on).
+.TP
+.BI \-\-passes " N"
+Repeat each test
+.I N
+times and report the spread.  For
+.B disk
+this tames SD-card and flash-based SCSI emulators, whose write throughput is
+erratic -- garbage collection and cache flushes make a single short
+measurement unreliable, while reads stay stable; the on-screen table shows the
+median and the CSV records min, median and max for every metric.  For
+.B cpu
+each kernel is repeated and the median rate is reported with a
+.RB \(+- "" %
+spread, which smooths the cache-sensitive run-to-run scatter of Dhrystone and
+Whetstone.  A characterization run: implies plain output.  Default 1.
+.TP
+.BI \-\-mhz " N"
+CPU clock in MHz for the per-clock normalization in the
+.B cpu
+report.  Auto-detected via
+.BR psrinfo (1M)
+when not given.
+.TP
+.B \-\-mp
+For the
+.B cpu
+and
+.B mem
+commands, run the multiprocessor scaling test across all online processors
+(detected via
+.BR sysconf (3C))
+instead of a single-process benchmark.
+.TP
+.BI \-\-cpus " N"
+As
+.BR \-\-mp ,
+but run exactly
+.I N
+concurrent processes.  Implies
+.BR \-\-mp .
+.TP
+.BI \-\-memsize " MB"
+Maximum working-set size for the
+.B mem
+sweep.  Default: min(256, RAM/4) MB -- large enough to overflow the biggest
+cache of any machine (modern last-level caches reach tens of megabytes)
+while fitting a small machine's RAM.
+.TP
+.BI \-\-server " HOST"
+Machine running
+.B sunbench-netd
+for the
+.B net
+test.
+.TP
+.BI \-\-netport " N"
+Control port for the network test (default 5202).
+.B \-\-port
+is accepted as an alias.
+.TP
+.BI \-\-netmax " BYTES"
+Maximum UDP payload for the network sweep.  Default: the local interface's
+MTU minus IP/UDP headers.  Values above the MTU deliberately exercise IP
+fragmentation.
+.TP
+.B \-\-plain
+Force plain text output, disabling the full-screen interface.  Implied
+whenever output is not a terminal.
+.TP
+.B \-\-menu
+Force the interactive menu.
+.TP
+.B \-\-full
+Equivalent to the
+.B full
+command.
+.TP
+.B \-\-keep
+Keep the scratch file after the run instead of removing it.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.SH USER INTERFACE
+On a terminal, runs are shown in a live full-screen display drawn with plain
+ANSI/vt100 escape sequences; no
+.BR curses (3)
+library is required.  When standard output is a pipe or a file, or
+.B \-\-plain
+is given, output is ordinary text with progress written to standard error,
+so scripting and logging are unaffected.
+.PP
+The time spent painting the display is measured and excluded from the
+reported throughput, so the interface does not affect the results even on a
+slow serial console.  Per-operation latency never included display time.
+.SH NOTES
+On Solaris,
+.I /tmp
+is a
+.BR tmpfs (7FS)
+filesystem backed by swap.  Benchmarking a file there measures memory, not
+storage;
+.B sunbench
+detects this and warns.  Use
+.BR df (1M)
+to choose a filesystem on a
+.I /dev/dsk
+device.
+.PP
+Random I/O on emulated SCSI devices is frequently limited by per-command
+latency rather than bandwidth, which shows up as an IOPS figure that is flat
+across small block sizes.  The block-size sweep is the quickest way to see
+where that limit gives way to bandwidth.
+.SH EXAMPLES
+Standard run against a real filesystem:
+.PP
+.RS
+.nf
+sunbench \-\-path /export/home/sb.dat disk
+.fi
+.RE
+.PP
+Block-size sweep with the latency distribution:
+.PP
+.RS
+.nf
+sunbench \-\-path /export/home/sb.dat \-\-sweep \-\-hist disk
+.fi
+.RE
+.PP
+Unattended full suite, logged and tabulated for a spreadsheet:
+.PP
+.RS
+.nf
+sunbench \-\-path /export/home/sb.dat \-\-log fleet.log \\
+         \-\-csv fleet.csv \-\-note "OBP 1.0; BlueSCSI Pico" full
+.fi
+.RE
+.PP
+CPU benchmark, logged and tabulated, then a multiprocessor scaling run:
+.PP
+.RS
+.nf
+sunbench \-\-log cpu.log \-\-csv cpu.csv \-\-note "SM61" cpu
+sunbench \-\-mp cpu
+.fi
+.RE
+.PP
+Memory cache-hierarchy sweep, and the aggregate-bandwidth MP test:
+.PP
+.RS
+.nf
+sunbench \-\-log mem.log \-\-csv mem.csv \-\-note "SS10 2x HS150" mem
+sunbench \-\-mp mem
+.fi
+.RE
+.PP
+Network test (first start the server on a modern machine:
+.BR "make netd && ./sunbench-netd" ):
+.PP
+.RS
+.nf
+sunbench \-\-server modernbox \-\-log net.log \-\-csv net.csv net
+sunbench \-\-server modernbox \-\-netmax 8900 net   # explore fragmentation
+.fi
+.RE
+.SH FILES
+.TP
+.I ./sunbench.dat
+Default scratch file; removed after the run unless
+.B \-\-keep
+is given.
+.TP
+.I /etc/mnttab
+Consulted to map the scratch path to its disk device.
+.SH EXIT STATUS
+Returns 0 on success and 2 if the command line could not be parsed.
+.SH SEE ALSO
+.BR df (1M),
+.BR iostat (1M),
+.BR directio (3C)
+.SH AUTHOR
+Written for benchmarking vintage Sun workstations and servers.

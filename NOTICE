@@ -1,0 +1,24 @@
+sunbench
+Copyright (C) 2026 thenetworkinglab
+
+sunbench is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.  It is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See LICENSE for the
+full text of the GNU General Public License, version 3.
+
+Third-party code
+----------------
+
+src/whet.c -- C Converted Whetstone Double Precision Benchmark, version 1.2
+    (c) Copyright 1998 Painter Engineering, Inc.  All Rights Reserved.
+    Converted by Rich Painter from the www.netlib.org whetstoned benchmark.
+    Distributed under its own terms, which are reproduced unaltered in the
+    comment block at the top of src/whet.c; that file is not covered by
+    the GPL.
+
+src/dhry_1.c, src/dhry_2.c, src/dhry.h -- Dhrystone 2.1
+    by Reinhold P. Weicker (1988), distributed as public domain.
+    sunbench's adaptations of these files are under the GPL as above.
